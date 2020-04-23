@@ -9286,6 +9286,7 @@ TEST_F(VkLayerTest, CreateImageYcbcrFormats) {
 
 TEST_F(VkLayerTest, BindImageMemorySwapchain) {
     TEST_DESCRIPTION("Invalid bind image with a swapchain");
+
     SetTargetApiVersion(VK_API_VERSION_1_1);
 
     if (!AddSurfaceInstanceExtension()) {
@@ -9294,6 +9295,11 @@ TEST_F(VkLayerTest, BindImageMemorySwapchain) {
     }
 
     ASSERT_NO_FATAL_FAILURE(InitFramework(m_errorMonitor));
+
+    if (!vk_gpu_table.find("GalaxyS10")->second.compare(pdp().deviceName)) {
+        printf("%s This test should not run on Galaxy S10\n", kSkipPrefix);
+        return;
+    }
 
     if (!AddSwapchainDeviceExtension()) {
         printf("%s swapchain extensions not supported, skipping BindSwapchainImageMemory test\n", kSkipPrefix);

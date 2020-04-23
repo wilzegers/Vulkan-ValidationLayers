@@ -26,6 +26,11 @@ TEST_F(VkGpuAssistedLayerTest, GpuValidationArrayOOBGraphicsShaders) {
 
     bool descriptor_indexing = InitGpuAssistedFramework(true);
 
+    if (!vk_gpu_table.find("GalaxyS10")->second.compare(pdp().deviceName)) {
+        printf("%s This test should not run on Galaxy S10\n", kSkipPrefix);
+        return;
+    }
+
     if (DeviceIsMockICD() || DeviceSimulation()) {
         printf("%s GPU-Assisted validation test requires a driver that can draw.\n", kSkipPrefix);
         return;
