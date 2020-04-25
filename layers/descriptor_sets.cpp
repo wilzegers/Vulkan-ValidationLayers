@@ -677,12 +677,13 @@ unsigned DescriptorRequirementsBitsFromFormat(VkFormat fmt) {
 //  This includes validating that all descriptors in the given bindings are updated,
 //  that any update buffers are valid, and that any dynamic offsets are within the bounds of their buffers.
 // Return true if state is acceptable, or false and write an error message into error string
-bool CoreChecks::ValidateDrawState(const DescriptorSet *descriptor_set, const std::map<uint32_t, descriptor_req> &bindings,
-                                   const std::vector<uint32_t> &dynamic_offsets, const CMD_BUFFER_STATE *cb_node,
-                                   const char *caller, std::string *error) const {
+bool cvdescriptorset::DescriptorSet::ValidateDrawState(const CoreChecks *core, const std::map<uint32_t, descriptor_req> &bindings,
+                                                       const std::vector<uint32_t> &dynamic_offsets,
+                                                       const CMD_BUFFER_STATE *cb_node, const char *caller,
+                                                       std::string *error) const {
     for (auto binding_pair : bindings) {
         auto binding = binding_pair.first;
-        DescriptorSetLayout::ConstBindingIterator binding_it(descriptor_set->GetLayout().get(), binding);
+        DescriptorSetLayout::ConstBindingIterator binding_it(GetLayout().get(), binding);
         if (binding_it.AtEnd()) {  //  End at construction is the condition for an invalid binding.
             std::stringstream error_str;
             error_str << "Attempting to validate DrawState for binding #" << binding
@@ -697,24 +698,17 @@ bool CoreChecks::ValidateDrawState(const DescriptorSet *descriptor_set, const st
             // or the view could have been destroyed
             continue;
         }
-        if (!ValidateDescriptorSetBindingData(cb_node, descriptor_set, dynamic_offsets, binding, binding_pair.second, caller,
-                                              error))
+        if (!ValidateDescriptorSetBindingData(core, cb_node, dynamic_offsets, binding, binding_pair.second, caller, error))
             return false;
     }
     return true;
 }
 
-bool CoreChecks::ValidateDescriptorSetBindingData(const CMD_BUFFER_STATE *cb_node, const DescriptorSet *descriptor_set,
-                                                  const std::vector<uint32_t> &dynamic_offsets, uint32_t binding,
-                                                  descriptor_req reqs, const char *caller, std::string *error) const {
-    using DescriptorClass = cvdescriptorset::DescriptorClass;
-    using BufferDescriptor = cvdescriptorset::BufferDescriptor;
-    using ImageDescriptor = cvdescriptorset::ImageDescriptor;
-    using ImageSamplerDescriptor = cvdescriptorset::ImageSamplerDescriptor;
-    using SamplerDescriptor = cvdescriptorset::SamplerDescriptor;
-    using TexelDescriptor = cvdescriptorset::TexelDescriptor;
-    using AccelerationStructureDescriptor = cvdescriptorset::AccelerationStructureDescriptor;
-    DescriptorSetLayout::ConstBindingIterator binding_it(descriptor_set->GetLayout().get(), binding);
+bool cvdescriptorset::DescriptorSet::ValidateDescriptorSetBindingData(const CoreChecks *core, const CMD_BUFFER_STATE *cb_node,
+                                                                      const std::vector<uint32_t> &dynamic_offsets,
+                                                                      uint32_t binding, descriptor_req reqs, const char *caller,
+                                                                      std::string *error) const {
+    DescriptorSetLayout::ConstBindingIterator binding_it(GetLayout().get(), binding);
     {
         // Copy the range, the end range is subject to update based on variable length descriptor arrays.
         cvdescriptorset::IndexRange index_range = binding_it.GetGlobalIndexRange();
@@ -722,12 +716,12 @@ bool CoreChecks::ValidateDescriptorSetBindingData(const CMD_BUFFER_STATE *cb_nod
 
         if (binding_it.IsVariableDescriptorCount()) {
             // Only validate the first N descriptors if it uses variable_count
-            index_range.end = index_range.start + descriptor_set->GetVariableDescriptorCount();
+            index_range.end = index_range.start + GetVariableDescriptorCount();
         }
 
         for (uint32_t i = index_range.start; i < index_range.end; ++i, ++array_idx) {
             uint32_t index = i - index_range.start;
-            const auto *descriptor = descriptor_set->GetDescriptorFromGlobalIndex(i);
+            const auto *descriptor = GetDescriptorFromGlobalIndex(i);
 
             if (descriptor->GetClass() == DescriptorClass::InlineUniform) {
                 // Can't validate the descriptor because it may not have been updated.
@@ -747,7 +741,7 @@ bool CoreChecks::ValidateDescriptorSetBindingData(const CMD_BUFFER_STATE *cb_nod
                     if (!buffer_node || buffer_node->destroyed) {
                         std::stringstream error_str;
                         error_str << "Descriptor in binding #" << binding << " index " << index << " is using buffer "
-                                  << report_data->FormatHandle(buffer) << " that is invalid or has been destroyed.";
+                                  << core->report_data->FormatHandle(buffer) << " that is invalid or has been destroyed.";
                         *error = error_str.str();
                         return false;
                     } else if (!buffer_node->sparse) {
@@ -755,8 +749,8 @@ bool CoreChecks::ValidateDescriptorSetBindingData(const CMD_BUFFER_STATE *cb_nod
                             if (mem_binding->destroyed) {
                                 std::stringstream error_str;
                                 error_str << "Descriptor in binding #" << binding << " index " << index << " uses buffer "
-                                          << report_data->FormatHandle(buffer) << " that references invalid memory "
-                                          << report_data->FormatHandle(mem_binding->mem) << ".";
+                                          << core->report_data->FormatHandle(buffer) << " that references invalid memory "
+                                          << core->report_data->FormatHandle(mem_binding->mem) << ".";
                                 *error = error_str.str();
                                 return false;
                             }
@@ -772,7 +766,7 @@ bool CoreChecks::ValidateDescriptorSetBindingData(const CMD_BUFFER_STATE *cb_nod
                             if ((dyn_offset + desc_offset) > buffer_size) {
                                 std::stringstream error_str;
                                 error_str << "Dynamic descriptor in binding #" << binding << " index " << index << " uses buffer "
-                                          << report_data->FormatHandle(buffer)
+                                          << core->report_data->FormatHandle(buffer)
                                           << " with update range of VK_WHOLE_SIZE has dynamic offset " << dyn_offset
                                           << " combined with offset " << desc_offset << " that oversteps the buffer size of "
                                           << buffer_size << ".";
@@ -783,7 +777,7 @@ bool CoreChecks::ValidateDescriptorSetBindingData(const CMD_BUFFER_STATE *cb_nod
                             if ((dyn_offset + desc_offset + range) > buffer_size) {
                                 std::stringstream error_str;
                                 error_str << "Dynamic descriptor in binding #" << binding << " index " << index << " uses buffer "
-                                          << report_data->FormatHandle(buffer) << " with dynamic offset " << dyn_offset
+                                          << core->report_data->FormatHandle(buffer) << " with dynamic offset " << dyn_offset
                                           << " combined with offset " << desc_offset << " and range " << range
                                           << " that oversteps the buffer size of " << buffer_size << ".";
                                 *error = error_str.str();
@@ -810,7 +804,7 @@ bool CoreChecks::ValidateDescriptorSetBindingData(const CMD_BUFFER_STATE *cb_nod
                         //  as "invalid" (updated = false) at DestroyImageView() time and detect this error at bind time
                         std::stringstream error_str;
                         error_str << "Descriptor in binding #" << binding << " index " << index << " is using imageView "
-                                  << report_data->FormatHandle(image_view) << " that is invalid or has been destroyed.";
+                                  << core->report_data->FormatHandle(image_view) << " that is invalid or has been destroyed.";
                         *error = error_str.str();
                         return false;
                     }
@@ -839,15 +833,15 @@ bool CoreChecks::ValidateDescriptorSetBindingData(const CMD_BUFFER_STATE *cb_nod
                         }
                     }
 
-                    if (!disabled.image_layout_validation) {
+                    if (!core->disabled.image_layout_validation) {
                         auto image_node = image_view_state->image_state.get();
                         assert(image_node);
                         // Verify Image Layout
                         // No "invalid layout" VUID required for this call, since the optimal_layout parameter is UNDEFINED.
                         bool hit_error = false;
-                        VerifyImageLayout(cb_node, image_node, image_view_state->normalized_subresource_range,
-                                          image_view_ci.subresourceRange.aspectMask, image_layout, VK_IMAGE_LAYOUT_UNDEFINED,
-                                          caller, kVUIDUndefined, "VUID-VkDescriptorImageInfo-imageLayout-00344", &hit_error);
+                        core->VerifyImageLayout(cb_node, image_node, image_view_state->normalized_subresource_range,
+                                                image_view_ci.subresourceRange.aspectMask, image_layout, VK_IMAGE_LAYOUT_UNDEFINED,
+                                                caller, kVUIDUndefined, "VUID-VkDescriptorImageInfo-imageLayout-00344", &hit_error);
                         if (hit_error) {
                             *error =
                                 "Image layout specified at vkUpdateDescriptorSet* or vkCmdPushDescriptorSet* time "
@@ -881,7 +875,7 @@ bool CoreChecks::ValidateDescriptorSetBindingData(const CMD_BUFFER_STATE *cb_nod
                     if (!buffer_view_state || buffer_view_state->destroyed) {
                         std::stringstream error_str;
                         error_str << "Descriptor in binding #" << binding << " index " << index << " is using bufferView "
-                                  << report_data->FormatHandle(buffer_view) << " that is invalid or has been destroyed.";
+                                  << core->report_data->FormatHandle(buffer_view) << " that is invalid or has been destroyed.";
                         *error = error_str.str();
                         return false;
                     }
@@ -890,7 +884,7 @@ bool CoreChecks::ValidateDescriptorSetBindingData(const CMD_BUFFER_STATE *cb_nod
                     if (buffer_state->destroyed) {
                         std::stringstream error_str;
                         error_str << "Descriptor in binding #" << binding << " index " << index << " is using buffer "
-                                  << report_data->FormatHandle(buffer) << " that has been destroyed.";
+                                  << core->report_data->FormatHandle(buffer) << " that has been destroyed.";
                         *error = error_str.str();
                         return false;
                     }
@@ -913,7 +907,7 @@ bool CoreChecks::ValidateDescriptorSetBindingData(const CMD_BUFFER_STATE *cb_nod
                     if (!acc_node || acc_node->destroyed) {
                         std::stringstream error_str;
                         error_str << "Descriptor in binding #" << binding << " index " << index
-                                  << " is using acceleration structure " << report_data->FormatHandle(acc)
+                                  << " is using acceleration structure " << core->report_data->FormatHandle(acc)
                                   << " that is invalid or has been destroyed.";
                         *error = error_str.str();
                         return false;
@@ -922,8 +916,8 @@ bool CoreChecks::ValidateDescriptorSetBindingData(const CMD_BUFFER_STATE *cb_nod
                             if (mem_binding->destroyed) {
                                 std::stringstream error_str;
                                 error_str << "Descriptor in binding #" << binding << " index " << index
-                                          << " uses acceleration structure " << report_data->FormatHandle(acc)
-                                          << " that references invalid memory " << report_data->FormatHandle(mem_binding->mem)
+                                          << " uses acceleration structure " << core->report_data->FormatHandle(acc)
+                                          << " that references invalid memory " << core->report_data->FormatHandle(mem_binding->mem)
                                           << ".";
                                 *error = error_str.str();
                                 return false;
@@ -945,15 +939,15 @@ bool CoreChecks::ValidateDescriptorSetBindingData(const CMD_BUFFER_STATE *cb_nod
                     if (!sampler_state || sampler_state->destroyed) {
                         std::stringstream error_str;
                         error_str << "Descriptor in binding #" << binding << " index " << index << " is using sampler "
-                                  << report_data->FormatHandle(sampler) << " that is invalid or has been destroyed.";
+                                  << core->report_data->FormatHandle(sampler) << " that is invalid or has been destroyed.";
                         *error = error_str.str();
                         return false;
                     } else {
                         if (sampler_state->samplerConversion && !descriptor->IsImmutableSampler()) {
                             std::stringstream error_str;
-                            error_str << "sampler (" << report_data->FormatHandle(sampler) << ") in the descriptor set ("
-                                      << report_data->FormatHandle(descriptor_set->GetSet()) << ") contains a YCBCR conversion ("
-                                      << report_data->FormatHandle(sampler_state->samplerConversion)
+                            error_str << "sampler (" << core->report_data->FormatHandle(sampler) << ") in the descriptor set ("
+                                      << core->report_data->FormatHandle(GetSet()) << ") contains a YCBCR conversion ("
+                                      << core->report_data->FormatHandle(sampler_state->samplerConversion)
                                       << ") , then the sampler MUST also exists as an immutable sampler.";
                             *error = error_str.str();
                         }

@@ -675,6 +675,15 @@ class DescriptorSet : public BASE_NODE {
         void operator()(Descriptor *desc) { desc->~Descriptor(); }
     };
 
+    // For given bindings validate state at time of draw is correct, returning false on error and writing error details into string*
+    bool ValidateDrawState(const CoreChecks *core, const std::map<uint32_t, descriptor_req> &bindings,
+                           const std::vector<uint32_t> &dynamic_offsets, const CMD_BUFFER_STATE *cb_node, const char *caller,
+                           std::string *error) const;
+
+    bool ValidateDescriptorSetBindingData(const CoreChecks *core, const CMD_BUFFER_STATE *cb_node,
+                                          const std::vector<uint32_t> &dynamic_offsets, uint32_t binding, descriptor_req reqs,
+                                          const char *caller, std::string *error) const;
+
   private:
     // Private helper to set all bound cmd buffers to INVALID state
     void InvalidateBoundCmdBuffers(ValidationStateTracker *state_data);
